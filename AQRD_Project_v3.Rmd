@@ -360,17 +360,26 @@ iv1_reg <- ivreg(Mayor_promotion3y ~ Mayor_plan + Per_pop_2 + iv1_int + as.facto
 # stargazer for first model
 stargazer(iv1_reg, type = "text", omit = c("provinceyear", "City_Code"))
 
+#first-stage regression for model 1
+first_stage_1 <- lm(Mayor_plan ~ iv1 + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code), data = subway_use_filtered)
+
 # model 2: adds in mayor characteristics
 iv2_reg <- ivreg(Mayor_promotion3y ~ Mayor_plan + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code) +gender2 + race6 + Mayor_age + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work | iv1 + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code) + gender2 + race6 + Mayor_age + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work, data = extension_use_filtered)
 
 #stargazer for second model
 stargazer(iv2_reg, type = "text", omit = c("provinceyear", "City_Code"))
 
+#first-stage regression for second model
+first_stage_2 <- lm(Mayor_plan ~ iv1 + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code) +gender2 + race6 + Mayor_age + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work, data = subway_use_filtered)
+
 # model 3: adds in mayor and city characteristics
 iv3_reg <- ivreg(Mayor_promotion3y ~ Mayor_plan + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code), data = subway_use_filtered)
 
 #stargazer for model 3
 stargazer(iv3_reg, type = "text", omit = c("provinceyear", "City_Code"))
+
+#first-stage regression for third model
+first_stage_3 <- lm(Mayor_plan ~ iv1 + Mayor_plan + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code), data = subway_use_filtered)
 
 ```
 
@@ -412,5 +421,11 @@ modelsummary(list(iv1_reg, iv2_reg, iv3_reg, iv4_reg, iv5_reg,
              gof_map = c("nobs")
              )
 
+#additional for first-stage regressions
+modelsummary(list(first_stage_1, first_stage_2, first_stage_3),
+             coef_omit = c(-2),
+             coef_rename = c("iv1" = "IV (Population > 3 million"),
+             gof_map = c("nobs", "f-stat")
+)
 ```
 
