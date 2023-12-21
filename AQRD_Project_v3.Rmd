@@ -353,90 +353,61 @@ mayor_cont <- paste(c(mayor_cont), collapse = " + ")
 base_cont <- c("lgdp_1", "lrev_1", "GRP_growth_1")
 base_cont <- paste(c(base_cont), collapse = " + ")
 
+
 # model 1
-iv1_formula <- glue("Mayor_promotion3y ~ {iv_cont} | Mayor_plan ~ iv1")
-iv1_reg <- feols(as.formula(iv1_formula), data = extension_use_filtered, cluster = "City_Code")
-summary(iv1)
+iv1_reg <- ivreg(Mayor_promotion3y ~ Mayor_plan + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code), data = extension_use_filtered)
 
 # stargazer for first model
-stargazer(iv1, type = "text", omit = c("provinceyear", "City_Code"))
+stargazer(iv1_reg, type = "text", omit = c("provinceyear", "City_Code"))
 
-#reg model 2
-iv2_formula <- glue("Mayor_promotion3y ~ Mayor_plan + {iv_cont} + {mayor_cont} | iv1 + {iv_cont} + {mayor_cont}")
-iv2 <- ivreg(as.formula(iv2_formula), data = subway_use_filtered)
-summary(iv2)
+# model 2: adds in mayor characteristics
+iv2_reg <- ivreg(Mayor_promotion3y ~ Mayor_plan + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code) +gender2 + race6 + Mayor_age + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work | iv1 + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code) + gender2 + race6 + Mayor_age + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work, data = extension_use_filtered)
 
 #stargazer for second model
-stargazer(iv2, type = "text", omit = c("provinceyear", "City_Code"))
+stargazer(iv2_reg, type = "text", omit = c("provinceyear", "City_Code"))
 
-#reg model 3
-ivreg_model3 <- ivreg(Mayor_promotion3y ~ Mayor_plan + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code), data = subway_use_filtered)
+# model 3: adds in mayor and city characteristics
+iv3_reg <- ivreg(Mayor_promotion3y ~ Mayor_plan + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code), data = subway_use_filtered)
 
 #stargazer for model 3
-stargazer(ivreg_model3, type = "text", omit = c("provinceyear", "City_Code"))
+stargazer(iv3_reg, type = "text", omit = c("provinceyear", "City_Code"))
 
 ```
 
 ```{r}
-
-## RD Extension --
-library(haven)
-library(dplyr)
-library(rdrobust) 
-library(AER)
-library(lmtest)
-library(stargazer)
-library(sandwich)
-
-subway_use <- read_dta("data/subway_analysis_use.dta")
+## RD extension
 
 #transformations for data
-extension_use <- subway_use %>%
+extension_use_filtered <- subway_use_filtered %>%
   mutate(
-    Per_pop_2 = (Per_pop_2 - 300) / 100,
-    iv1 = as.numeric(Per_pop_2 >= 0),
-    iv1_int = iv1 * Per_pop_2,
-    iv1_int2 = iv1 * Per_pop_2^2,
-    iv1_int3 = iv1 * Per_pop_2^3,
-    iv1_int4 = iv1 * Per_pop_2^4,
     GDP_growth_5yl = dplyr::lead(GRP_growth_m3, 5),
     GDP_growth = as.numeric(ifelse(GDP_growth_5yl > GRP_growth_m3, 1, 0))
   )
 
+# extension model 1 (model 4)
+iv4_reg <- ivreg(GDP_growth ~ Mayor_plan + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code), data = extension_use_filtered)
 
-#bandwidth (probs not gonna use this)
-bw_select <- rdbwselect(y = extension_use$Mayor_plan, x = extension_use$Per_pop_2, c = 0)
-bw <- bw_select$bws
-bw <- print(bw[1])
-
-#qualified cities & filter
-extension_use_filtered <- extension_use %>%
-  filter(Budget_income_2 > 1000000 & GRP_2 > 10000000) %>%
-  filter(abs(Per_pop_2) <= bw, fsj2 == 0)
-
-# extended model 1 (model 4)
-ivreg_model4 <- ivreg(GDP_growth ~ Mayor_plan + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code), data = extension_use_filtered)
+summary(iv4_reg)
 
 # stargazer for model 4
 
-stargazer(ivreg_model4, type = "text", omit = c("provinceyear", "City_Code"))
+stargazer(iv4_reg, type = "text", omit = c("provinceyear", "City_Code"))
 
-# extended model 2 (model 5)
-
-ivreg_model5 <- ivreg(GDP_growth ~ Mayor_plan + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + as.factor(provinceyear) + as.factor(City_Code), data = extension_use_filtered)
+# extension model 2 (model 5), adding in mayor characteristics
+iv5_reg <- ivreg(GDP_growth ~ Mayor_plan + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + as.factor(provinceyear) + as.factor(City_Code), data = extension_use_filtered)
 
 # stargazer for model 5                                                                         
-stargazer(ivreg_model5, type = "text", omit = c("provinceyear", "City_Code"))
+stargazer(iv5_reg, type = "text", omit = c("provinceyear", "City_Code"))
 
-#extended model 3 (model 6)
-ivreg_model6 <- ivreg(GDP_growth ~ Mayor_plan + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code), data = extension_use_filtered)
+#extended model 3 (model 6), adding in mayor and city characteristics
+iv6_reg <- ivreg(GDP_growth ~ Mayor_plan + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code), data = extension_use_filtered)
 
 #stargazer for model 6
-stargazer(ivreg_model6, type = "text", omit = c("provinceyear", "City_Code"))
+stargazer(iv6_reg, type = "text", omit = c("provinceyear", "City_Code"))
 
-#generating table
-modelsummary(list(iv1, iv2, ivreg_model3, ivreg_model4, ivreg_model5,
-                  ivreg_model6),
+#generating summary table
+modelsummary(list(iv1_reg, iv2_reg, iv3_reg, iv4_reg, iv5_reg,
+                  iv6_reg),
              coef_omit = c(-2, -3, -4),
              gof_map = c("nobs")
              )
