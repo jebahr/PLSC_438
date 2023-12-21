@@ -1,0 +1,444 @@
+---
+title: "AQRD-Proj"
+output: html_document
+date: "2023-12-18"
+---
+
+```{r}
+library(haven)
+library(ggplot2)
+library(dplyr)
+library(readstata13)
+library(knitr)
+library(tidyr)
+library(plm)
+library(foreign)
+library(stargazer)
+
+rail_data <- read_dta("data/rail.dta")
+road_data <- read_dta("data/road.dta")
+subway_clean <- read_dta("data/subway_clean_prov_use.dta")
+subway_use <- read_dta("data/subway_analysis_use.dta")
+```
+
+```{r}
+#figure 1 (rail)
+
+#calculations (per the file)
+rail_data <- rail_data %>%
+  mutate(lgdp_per = log(gdp / pop),
+         rail_share = rail / (0.91 * gdp) * 100,
+         rail2 = rail / 1e9)
+
+#plot creation
+p1 <- ggplot(rail_data, aes(x = lgdp_per, y = rail_share, label = id)) +
+  geom_point(aes(color = id == "CHN", shape = id == "CHN")) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  geom_text(hjust = 0.5, vjust = -0.5, check_overlap = TRUE) +
+  scale_color_manual(values = c("black", "red")) +
+  scale_shape_manual(values = c(16, 17)) +
+  labs(y = "Investment in Railway / GDP (%)", x = "GDP Per Capita (log)", title = "Investment in Transportation Infrastructure and GDP Per Capita (Railway)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+#print
+print(p1)
+
+#save
+ggsave("rail_plot.png", plot = p1, width = 8, height = 6, dpi = 300)
+```
+
+```{r}
+#figure 1 (road)
+
+#calculations (per the file)
+road_data <- road_data %>%
+  mutate(lgdp_per = log(gdp / pop),
+         road_share = road / (0.91 * gdp) * 100,
+         road2 = road / 1e9)
+
+#plot creation
+p2 <- ggplot(road_data, aes(x = lgdp_per, y = road_share, label = id)) +
+  geom_point(aes(color = id == "CHN", shape = id == "CHN")) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  geom_text(hjust = 0.5, vjust = -0.5, check_overlap = TRUE) +
+  scale_color_manual(values = c("black", "red")) +
+  scale_shape_manual(values = c(16, 17)) +
+  labs(y = "Investment in Road / GDP (%)", x = "GDP Per Capita (log)", title = "Investment in Transportation Infrastructure and GDP Per Capita (Road)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+#print
+print(p2)
+
+#save
+ggsave("road_plot_labeled.png", plot = p2, width = 8, height = 6, dpi = 300)
+
+```
+
+```{r}
+#table 1 (summary statistics)
+
+library(gt)
+library(dplyr)
+library(tidyr)
+
+#N
+N_values <- sapply(subway_use[c("Mayor_promotion3y", "Mayor_connection_work", 
+                                "Mayor_age", "Per_pop", "gdp", "rev", 
+                                "GRP_growth", "inv1_per", "GRP_per", 
+                                "land_per", "rev_per", "Mayor_plan")], function(x) sum(!is.na(x)))
+
+#retitle variables
+variable_names <- c(
+  Mayor_promotion3y = "Mayor promoted within three years",
+  Mayor_connection_work = "Mayor connection",
+  Mayor_age = "Mayor age",
+  Per_pop = "City population",
+  gdp = "City GDP (billion ¥)",
+  rev = "City fiscal revenue (Billion ¥)",
+  GRP_growth = "City GDP growth rate (%)",
+  inv1_per = "Mayor obtaining subway approval",
+  Mayor_plan = "City investment in infrastructure per capita (¥)",
+  GRP_per = "City GDP per capita (¥)",
+  land_per = "City land sales revenue per capita (¥)",
+  rev_per = "City fiscal revenue per capita (¥)"
+)
+
+#long data format
+long_data <- subway_use %>%
+  pivot_longer(cols = names(N_values),
+               names_to = "Variable", values_to = "Value")
+
+#summary statistics
+summary_data <- long_data %>%
+  group_by(Variable) %>%
+  summarize(
+    Mean = mean(Value, na.rm = TRUE),
+    Min = min(Value, na.rm = TRUE),
+    Max = max(Value, na.rm = TRUE)
+  ) %>%
+  mutate(across(c(Mean, Min, Max), round, 2)) %>%
+  mutate(N = N_values[Variable]) %>%
+  mutate(Variable = variable_names[Variable])
+
+#gt()
+gt_table <- gt(summary_data) %>%
+  tab_header(
+    title = "Summary Statistics for Each Variable"
+  ) %>%
+  cols_label(
+    Variable = "Variable",
+    N = "N",
+    Mean = "Mean",
+    Min = "Min",
+    Max = "Max"
+  )
+
+#print
+print(gt_table)
+
+```
+
+
+```{r}
+#DiD
+
+#libraries
+library(dplyr)
+library(fixest)
+
+#fsj2 == 0 subset
+data_subset <- filter(subway_use, fsj2 == 0)
+
+#identifying control variables
+mayor_cont <- c("gender2", "race6", "Mayor_age", "Mayor_c_edu", "Mayor_c_central_exp", 
+                "Mayor_c_prov_exp", "Mayor_c_county_exp", "Mayor_c_soe_exp", 
+                "Mayor_c_univ_exp", "Mayor_c_league", "Mayor_connection_work")
+mayor_cont <- paste(c(mayor_cont), collapse = " + ")
+base_cont <- c("lpop_1", "lgdp_1", "lrev_1", "GRP_growth_1")
+base_cont <- paste(c(base_cont), collapse = " + ")
+
+# model 1: most basic
+model1 <- feols(Mayor_promotion3y ~ Mayor_plan | City_Code + Year, data = data_subset, cluster = "City_Code")
+
+# model 2: adding in mayor controls
+model2_formula <- glue("Mayor_promotion3y ~ Mayor_plan + {mayor_cont} | City_Code + Year")
+model2 <- feols(as.formula(model2_formula), data = data_subset, cluster = "City_Code")
+
+# model 3: adding in mayor and city controls
+model3_formula <- glue("Mayor_promotion3y ~ Mayor_plan + {mayor_cont} + {base_cont} | City_Code + Year")
+model3 <- feols(as.formula(model3_formula), data = data_subset, cluster = "City_Code")
+
+# model 4: adding in mayor and city controls and province-year FEs:
+model4_formula <- glue("Mayor_promotion3y ~ Mayor_plan + {mayor_cont} + {base_cont} | provinceyear + City_Code + Year")
+model4 <- feols(as.formula(model4_formula), data = data_subset, cluster = "City_Code")
+
+```
+
+```{r}
+#DID extension
+#control variables are the same as above, except base_cont drops GDP growth
+#as GDP growth is our new independent variable being tested, dropping for collinearity
+mayor_cont <- c("gender2", "race6", "Mayor_age", "Mayor_c_edu", "Mayor_c_central_exp", 
+                "Mayor_c_prov_exp", "Mayor_c_county_exp", "Mayor_c_soe_exp", 
+                "Mayor_c_univ_exp", "Mayor_c_league", "Mayor_connection_work")
+mayor_cont <- paste(c(mayor_cont), collapse = " + ")
+
+#note here that GDP growth is removed, different from replication models
+base_cont <- c("lpop_1", "lgdp_1", "lrev_1")
+base_cont <- paste(c(base_cont), collapse = " + ")
+
+
+# model 5: most basic
+model5 <- feols(Mayor_promotion3y ~ GRP_growth_m3 | City_Code + Year, data = data_subset, cluster = "City_Code")
+
+# model 6: regression both subway plan approval and GDP growth
+model6 <- feols(Mayor_promotion3y ~ Mayor_plan + GRP_growth_m3 | City_Code + Year, data = data_subset, cluster = "City_Code")
+
+# model 7: adding in mayor controls
+model7_formula <- glue("Mayor_promotion3y ~ Mayor_plan + GRP_growth_m3 + {mayor_cont} | City_Code + Year")
+model7 <- feols(as.formula(model7_formula), data = data_subset, cluster = "City_Code")
+
+# model 8: adding in city and mayor controls
+model8_formula <- glue("Mayor_promotion3y ~ Mayor_plan + GRP_growth_m3 + {mayor_cont} + {base_cont} | City_Code + Year")
+model8 <- feols(as.formula(model8_formula), data = data_subset, cluster = "City_Code")
+
+# model 9: adding in city and mayor controls and province-year FEs
+model9_formula <- glue("Mayor_promotion3y ~ Mayor_plan + GRP_growth_m3 + {mayor_cont} + {base_cont} | provinceyear + City_Code + Year")
+model9 <- feols(as.formula(model9_formula), data = data_subset, cluster = "City_Code")
+
+modelsummary(list(model1, model2, model3, model4, model5, model6, model7, model8, model9),
+             coef_omit = c(2:16),
+             coef_rename = c("Mayor_plan" = "Subway Plan Approval",
+                             "GRP_growth_m3" = "GDP Growth Rate"),
+             gof_map = c("nobs", "FE: City_Code", "FE: Year", "FE: provinceyear"),
+             title = "Mayor Promoted within Three Years")
+
+```
+
+```{r}
+#figure 2
+
+library(readstata13)
+library(dplyr)
+library(plm)
+library(sandwich)
+library(lmtest)
+library(ggplot2)
+library(broom)
+
+#data read
+subway_analysis_use <- read_dta("data/subway_analysis_use.dta")
+
+#filter fsj2 == 0
+subway_analysis_use <- subway_analysis_use %>%
+  filter(fsj2 == 0)
+
+#lagged and lead variables for mayor_plan
+subway_analysis_use <- subway_analysis_use %>%
+  arrange(City_Code, Year) %>%
+  group_by(City_Code) %>%
+  mutate(
+    L_Mayor_plan = dplyr::lag(Mayor_plan, 1),
+    L2_Mayor_plan = dplyr::lag(Mayor_plan, 2),
+    L3_Mayor_plan = dplyr::lag(Mayor_plan, 3),
+    L4_Mayor_plan = dplyr::lag(Mayor_plan, 4),
+    F_Mayor_plan = dplyr::lead(Mayor_plan, 1),
+    F2_Mayor_plan = dplyr::lead(Mayor_plan, 2),
+    F3_Mayor_plan = dplyr::lead(Mayor_plan, 3),
+    F4_Mayor_plan = dplyr::lead(Mayor_plan, 4),
+    F5_Mayor_plan = dplyr::lead(Mayor_plan, 5)
+  ) %>%
+  ungroup()
+
+#mpprior, mppost, and mpconn variable creation
+subway_analysis_use <- subway_analysis_use %>%
+  mutate(
+    mpprior1 = as.integer(Mayor_plan == 0 & F_Mayor_plan == 1),
+    mpprior2 = as.integer(Mayor_plan == 0 & F_Mayor_plan == 0 & F2_Mayor_plan == 1),
+    mpprior3 = as.integer(Mayor_plan == 0 & F_Mayor_plan == 0 & F2_Mayor_plan == 0 & F3_Mayor_plan == 1),
+    mpprior4 = as.integer(Mayor_plan == 0 & F_Mayor_plan == 0 & F2_Mayor_plan == 0 & F3_Mayor_plan == 0 & F4_Mayor_plan == 1),
+    mpprior5 = as.integer(Mayor_plan == 0 & F_Mayor_plan == 0 & F2_Mayor_plan == 0 & F3_Mayor_plan == 0 & F4_Mayor_plan == 0 & F5_Mayor_plan == 0),
+
+    mppost1 = as.integer(Mayor_plan == 0 & L_Mayor_plan == 1),
+    mppost2 = as.integer(Mayor_plan == 0 & L_Mayor_plan == 0 & L2_Mayor_plan == 1),
+    mppost3 = as.integer(Mayor_plan == 0 & L_Mayor_plan == 0 & L2_Mayor_plan == 0 & L3_Mayor_plan == 1),
+    mppost4 = as.integer(Mayor_plan == 0 & L_Mayor_plan == 0 & L2_Mayor_plan == 0 & L3_Mayor_plan == 0 & L4_Mayor_plan == 0),
+
+    mpconn1 = as.integer(Mayor_plan == 1 & L_Mayor_plan == 0),
+    mpconn2 = as.integer(Mayor_plan == 1 & L_Mayor_plan == 1 & L2_Mayor_plan == 0),
+    mpconn3 = as.integer(Mayor_plan == 1 & L_Mayor_plan == 1 & L2_Mayor_plan == 1 & L3_Mayor_plan == 0),
+    mpconn4 = as.integer(Mayor_plan == 1 & L_Mayor_plan == 1 & L2_Mayor_plan == 1 & L3_Mayor_plan == 1 & L4_Mayor_plan == 0),
+    mpconn5 = as.integer(Mayor_plan == 1 & mpconn1 == 0 & mpconn2 == 0 & mpconn3 == 0 & mpconn4 == 0)
+  )
+
+#fit panel data model
+model <- plm(Mayor_promotion3y ~ mpprior5 + mpprior4 + mpprior3 + mpprior2 + mpconn1 + mpconn2 + mpconn3 + mpconn4 + mpconn5 + factor(Year),
+             data = subway_analysis_use,
+             index = c("City_Code", "Year"),
+             model = "within")
+
+#robust standard errors
+model_robust <- coeftest(model, vcov = vcovHC(model, type = "HC1", cluster = "group"))
+
+#model summary
+model_summary <- tidy(model, conf.int = TRUE)
+
+#custom labels
+plot_data <- model_summary %>%
+  filter(term %in% c("mpprior5", "mpprior4", "mpprior3", "mpprior2", "mpconn1", "mpconn2", "mpconn3", "mpconn4", "mpconn5")) %>%
+  mutate(label = factor(term, 
+                        levels = c("mpprior5", "mpprior4", "mpprior3", "mpprior2", "mpconn1", "mpconn2", "mpconn3", "mpconn4", "mpconn5"),
+                        labels = c("=<-5", "-4", "-3", "-2", "0", "1", "2", "3", ">=4")))
+
+#ggplot
+ggplot(plot_data, aes(x = label, y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.1) +
+  theme_minimal() +
+  labs(x = " ", y = "Effect of Approval on Mayoral Promotion in 3 Years") +
+  geom_hline(yintercept = 0, linetype = "dashed")
+```
+
+```{r}
+#table3
+
+#libraries
+library(haven)
+library(dplyr)
+library(rdrobust) 
+library(AER)
+library(lmtest)
+library(stargazer)
+library(sandwich)
+
+subway_use <- read_dta("data/subway_analysis_use.dta")
+
+#transformations for data
+subway_use <- subway_use %>%
+  mutate(
+    Per_pop_2 = (Per_pop_2 - 300) / 100,
+    iv1 = as.numeric(Per_pop_2 >= 0),
+    iv1_int = iv1 * Per_pop_2,
+    iv1_int2 = iv1 * Per_pop_2^2,
+    iv1_int3 = iv1 * Per_pop_2^3,
+    iv1_int4 = iv1 * Per_pop_2^4
+  )
+
+#bandwidth 
+bw_select <- rdbwselect(y = subway_use$Mayor_plan, x = subway_use$Per_pop_2, c = 0)
+bw <- bw_select$bw
+print(bw)
+
+#qualified cities
+subway_use_filtered <- subway_use %>%
+  filter(Budget_income_2 > 1000000, GRP_2 > 10000000)
+  
+#filter
+subway_use_filtered <- subway_use_filtered %>%
+  filter(abs(Per_pop_2) <= 1.058, fsj2 == 0)
+
+#control variables
+
+#identifying variable groupings
+iv_cont <- c("Per_pop_2", "iv1_int", "as.factor(provinceyear)", "as.factor(City_Code)")
+iv_cont <- paste(c(iv_cont), collapse = " + ")
+
+mayor_cont <- c("gender2", "race6", "Mayor_age", "Mayor_c_edu",
+                "Mayor_c_central_exp", "Mayor_c_prov_exp", "Mayor_c_county_exp",
+                "Mayor_c_soe_exp", "Mayor_c_univ_exp", "Mayor_c_league",
+                "Mayor_connection_work")
+mayor_cont <- paste(c(mayor_cont), collapse = " + ")
+base_cont <- c("lgdp_1", "lrev_1", "GRP_growth_1")
+base_cont <- paste(c(base_cont), collapse = " + ")
+
+# model 1
+iv1_formula <- glue("Mayor_promotion3y ~ {iv_cont} | Mayor_plan ~ iv1")
+iv1_reg <- feols(as.formula(iv1_formula), data = extension_use_filtered, cluster = "City_Code")
+summary(iv1)
+
+# stargazer for first model
+stargazer(iv1, type = "text", omit = c("provinceyear", "City_Code"))
+
+#reg model 2
+iv2_formula <- glue("Mayor_promotion3y ~ Mayor_plan + {iv_cont} + {mayor_cont} | iv1 + {iv_cont} + {mayor_cont}")
+iv2 <- ivreg(as.formula(iv2_formula), data = subway_use_filtered)
+summary(iv2)
+
+#stargazer for second model
+stargazer(iv2, type = "text", omit = c("provinceyear", "City_Code"))
+
+#reg model 3
+ivreg_model3 <- ivreg(Mayor_promotion3y ~ Mayor_plan + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code), data = subway_use_filtered)
+
+#stargazer for model 3
+stargazer(ivreg_model3, type = "text", omit = c("provinceyear", "City_Code"))
+
+```
+
+```{r}
+
+## RD Extension --
+library(haven)
+library(dplyr)
+library(rdrobust) 
+library(AER)
+library(lmtest)
+library(stargazer)
+library(sandwich)
+
+subway_use <- read_dta("data/subway_analysis_use.dta")
+
+#transformations for data
+extension_use <- subway_use %>%
+  mutate(
+    Per_pop_2 = (Per_pop_2 - 300) / 100,
+    iv1 = as.numeric(Per_pop_2 >= 0),
+    iv1_int = iv1 * Per_pop_2,
+    iv1_int2 = iv1 * Per_pop_2^2,
+    iv1_int3 = iv1 * Per_pop_2^3,
+    iv1_int4 = iv1 * Per_pop_2^4,
+    GDP_growth_5yl = dplyr::lead(GRP_growth_m3, 5),
+    GDP_growth = as.numeric(ifelse(GDP_growth_5yl > GRP_growth_m3, 1, 0))
+  )
+
+
+#bandwidth (probs not gonna use this)
+bw_select <- rdbwselect(y = extension_use$Mayor_plan, x = extension_use$Per_pop_2, c = 0)
+bw <- bw_select$bws
+bw <- print(bw[1])
+
+#qualified cities & filter
+extension_use_filtered <- extension_use %>%
+  filter(Budget_income_2 > 1000000 & GRP_2 > 10000000) %>%
+  filter(abs(Per_pop_2) <= bw, fsj2 == 0)
+
+# extended model 1 (model 4)
+ivreg_model4 <- ivreg(GDP_growth ~ Mayor_plan + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + as.factor(provinceyear) + as.factor(City_Code), data = extension_use_filtered)
+
+# stargazer for model 4
+
+stargazer(ivreg_model4, type = "text", omit = c("provinceyear", "City_Code"))
+
+# extended model 2 (model 5)
+
+ivreg_model5 <- ivreg(GDP_growth ~ Mayor_plan + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + as.factor(provinceyear) + as.factor(City_Code), data = extension_use_filtered)
+
+# stargazer for model 5                                                                         
+stargazer(ivreg_model5, type = "text", omit = c("provinceyear", "City_Code"))
+
+#extended model 3 (model 6)
+ivreg_model6 <- ivreg(GDP_growth ~ Mayor_plan + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code) | iv1 + Per_pop_2 + iv1_int + Mayor_age + gender2 + race6 + Mayor_c_edu + Mayor_c_central_exp + Mayor_c_prov_exp + Mayor_c_county_exp + Mayor_c_soe_exp + Mayor_c_univ_exp + Mayor_c_league + Mayor_connection_work + lgdp_per_1 + lrev_per_1 + GRP_growth_1 + as.factor(provinceyear) + as.factor(City_Code), data = extension_use_filtered)
+
+#stargazer for model 6
+stargazer(ivreg_model6, type = "text", omit = c("provinceyear", "City_Code"))
+
+#generating table
+modelsummary(list(iv1, iv2, ivreg_model3, ivreg_model4, ivreg_model5,
+                  ivreg_model6),
+             coef_omit = c(-2, -3, -4),
+             gof_map = c("nobs")
+             )
+```
+
