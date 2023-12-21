@@ -411,5 +411,6 @@ modelsummary(list(iv1_reg, iv2_reg, iv3_reg, iv4_reg, iv5_reg,
              coef_omit = c(-2, -3, -4),
              gof_map = c("nobs")
              )
+
 ```
 
